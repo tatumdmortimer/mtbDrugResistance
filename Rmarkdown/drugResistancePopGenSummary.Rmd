@@ -1,0 +1,1087 @@
+---
+title: "Signatures of positive selection at *Mycobacterium tuberculosis* drug resistance loci"
+author: "Tatum Mortimer"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+library(ggplot2)
+library(cowplot)
+library(knitr)
+library(ggtree)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(superheat)
+library(beeswarm)
+library(moments)
+```
+
+### Study motivation
+
+Using genes under selection for drug resistance in *M. tuberculosis*, we aim to test the ability of population genetics statistics to identify genes under positive selection in bacteria with strictly clonal reproduction.
+
+### Data set description
+
+We downloaded sequencing read data from two large surveys of drug resistant *M. tuberculosis* in Russia (Casali et al. 2014) and South Africa (Cohen et al. 2015). Reads were mapped to *M. tuberculosis* H37Rv using our validated reference guided assembly pipeline (https://github.com/tracysmith/RGAPepPipe/). We removed isolates with mean coverage less than 20X, isolates with percentage of the genome covered at 10X less than 90%, isolates where a majority of reads did not map to H37Rv, and isolates where greater than 10% of sites were unknown after mapping. The final dataset contains 1161 M. tuberculosis isolates, primarily from lineage 2 and lineage 4. The alignment was masked to remove repetitive regions including PE/PPE genes.
+
+### Phylogenetic analysis
+
+Phylogenetic analysis was performed using FastTree v 2.1.9 (compiled with the double precision option). The tree is currently being reestimated because I'm not positive that a masked alignment was used the first time around.
+
+```{r tree, include=TRUE}
+
+fasttree <- read.tree("../data/FINAL_tree.out")
+tree_plot <- ggtree(fasttree, layout = "unrooted") + geom_hilight("SRS415217", fill="blue")
+tree_plot
+
+```
+
+The majority of the isolates in this dataset are from lineage 2 (n = 667) or lineage 4 (n = 481). There are a few isolates from lineage 1 and lineage 3.
+
+### Frequency of drug resistance in dataset
+
+
+```{r susceptibility, include=FALSE}
+susceptibility <- read.delim("../data/drugSusceptibilityTotals.txt", header=FALSE)
+colnames(susceptibility) <- c("Drug", "Resistant", "Susceptible")
+susceptibility$Unknown <- 1161 - susceptibility$Resistant - susceptibility$Susceptible
+susceptibility <- arrange(susceptibility, desc(Resistant))
+resistanceGenesDrugs <- read.delim("../data/resistanceGeneNames.txt", header=FALSE)
+colnames(resistanceGenesDrugs) <- c("gene", "drug")
+resistanceGenes <- resistanceGenesDrugs$gene
+```
+
+`r kable(susceptibility)`
+
+```{r functionalCategories, include=FALSE}
+#functional cateogories from O'Neill et al. 2015
+
+fun_cats <- read.delim("../data/functionalCategories.TXT", header=F)
+rv_numbers <- read.delim("../data/rv_numbers.txt", header=F, stringsAsFactors = FALSE)
+colnames(fun_cats) <- c("Category", "Description", "Genes")
+tims <- filter(fun_cats, Category == "TIM") %>% select(Genes)
+tims <- unlist(strsplit(as.character(tims[1,1]), " "))
+tims_geneNames <- filter(rv_numbers, V2 %in% tims)
+lipids <- filter(fun_cats, Category == "Tuberculist_lip") %>% select(Genes)
+lipids <- unlist(strsplit(as.character(lipids[1,1]), " "))
+lipids_geneNames <- filter(rv_numbers, V2 %in% lipids)
+```
+
+
+### Size of genetic target for drug resistance
+
+Drug resistance mutations have been described for resistance to the most commonly used drugs. The TB Drug Resistance Mutation Database (https://tbdreamdb.ki.se/Info/) has a downloadable list of genes and specific mutations associated with drug resistance. I obtained the database to examine the size of the genetic target for resistance mutations in each drug. It is possible that some drug resistance mechanisms are more well studied than others (i.e. first line drugs), so the number of mutations reported in the database may not be strictly related to the size of the genetic target.
+
+```{r genetic_target}
+
+resistanceMutations <- read.csv("../tbdream_DB/tbdreamDB.csv")
+geneticTarget <- group_by(resistanceMutations, Drug) %>% 
+  summarise(unique_genes = n_distinct(GeneName), total_mutations=n()) %>%
+  arrange(desc(unique_genes), desc(total_mutations))
+mutations_per_gene <- group_by(resistanceMutations, GeneName) %>%
+  summarise(total_mutations=n_distinct(NucleotidePosition)) %>%
+  arrange(desc(total_mutations))
+
+```
+
+####Counts of genes and mutations known to cause drug resistance
+`r kable(geneticTarget)`
+
+####Counts of mutations per drug resistance associated gene
+`r kable(mutations_per_gene)`
+
+
+### Population genetics of *M. tuberculosis* genes
+
+The whole genome alignment of *M. tuberculosis* isolates was divided into genewise alignments based on the annotation of *M. tuberculosis* H37Rv. Egglib  was used to calculate neutrality and diversity statistics for these genewise alignments.
+
+
+```{r diversity}
+stats <- read.table("../data/genewiseStats.txt", 
+                    header=T, 
+                    na.strings = "None")
+stats <- drop_na(stats, Pi) %>% drop_na(Theta)
+pi_sum <- summary(stats$Pi)
+tajima_sum <- summary(stats$TajimasD)
+
+stats <- stats %>% mutate(pr_pi = rank(Pi)/length(Pi), 
+                          pr_theta = rank(Theta)/length(Theta),
+                          pr_TD = rank(TajimasD)/length(TajimasD))
+
+colnames(stats) <- c("gene", 
+                     "theta_all", 
+                     "pi_all", 
+                     "td_all", 
+                     "pr_pi_all", 
+                     "pr_theta_all", 
+                     "pr_TD_all")
+
+resGenesStats <- stats[stats$Alignment %in% resistanceGenes,]
+
+
+pi_plot <- ggplot(stats, aes(x=Pi)) + 
+  geom_histogram(binwidth=0.0001) +
+  xlab("Genewise nucleotide diversity") +
+  ggtitle("Genewise nucleotide diversity (all isolates)")
+#plot(pi_plot)
+
+lineage2_stats <- read.table("../data/genewiseStats_lineage2.txt",
+                             header=T,
+                             na.strings = "None")
+lineage2_stats <- drop_na(lineage2_stats, Pi) %>% drop_na(Theta)
+
+lineage2_stats <- lineage2_stats %>% mutate(pr_pi = rank(Pi)/length(Pi), 
+                          pr_theta = rank(Theta)/length(Theta),
+                          pr_TD = rank(TajimasD)/length(TajimasD))
+
+colnames(lineage2_stats) <- c("gene", 
+                     "theta_L2", 
+                     "pi_L2", 
+                     "td_L2", 
+                     "pr_pi_L2", 
+                     "pr_theta_L2", 
+                     "pr_TD_L2")
+
+resGeneStats_lin2 <- lineage2_stats[lineage2_stats$Alignment %in% resistanceGenes,]
+
+
+pi_plot_lin2 <- ggplot(lineage2_stats, aes(x=Pi)) + 
+  geom_histogram(binwidth=0.0001) +
+  xlab("Genewise nucleotide diversity") +
+  ggtitle("Genewise nucleotide diversity (lineage 2)")
+#plot(pi_plot_lin2)
+
+lineage4_stats <- read.table("../data/genewiseStats_lineage4.txt",
+                             header=T,
+                             na.strings = "None")
+
+
+lineage4_stats <- drop_na(lineage4_stats, Pi) %>% drop_na(Theta)
+
+lineage4_stats <- lineage4_stats %>% mutate(pr_pi = rank(Pi)/length(Pi), 
+                          pr_theta = rank(Theta)/length(Theta),
+                          pr_TD = rank(TajimasD)/length(TajimasD))
+
+colnames(lineage4_stats) <- c("gene", 
+                     "theta_L4", 
+                     "pi_L4", 
+                     "td_L4", 
+                     "pr_pi_L4", 
+                     "pr_theta_L4", 
+                     "pr_TD_L4")
+
+resGeneStats_lin4 <- lineage4_stats[lineage4_stats$Alignment %in% resistanceGenes,]
+
+
+pi_plot_lin4 <- ggplot(lineage4_stats, aes(x=Pi)) + 
+  geom_histogram(binwidth=0.0001) +
+  xlab("Genewise nucleotide diversity") +
+  ggtitle("Genewise nucleotide diversity (lineage 4)")
+#plot(pi_plot_lin4)
+
+stats_all <-  left_join(stats, lineage4_stats, by='gene') %>%
+                left_join(., lineage2_stats, by='gene') 
+
+stats_all.melt <- melt(stats_all, id.var=c("gene"))
+stats_pi <- filter(stats_all.melt, grepl("pi", variable))
+
+lineage_t_test <- t.test(lineage2_stats$pi_L2, lineage4_stats$pi_L4, alternative = "less")
+
+pi_boxplot <- ggplot(stats_pi, aes(variable, log10(value))) +
+  geom_boxplot() + 
+  xlab("Data Set") +
+  ylab("Nucleotide Diversity (log10)")
+
+plot(pi_boxplot)
+```
+
+
+`r kable(resGenesStats, digits=c(0,5,5,3,3,3,3), caption = "Diversity Statistics of Resistance Genes in All Isolates")`
+
+I additionally calculated diversity statistics for lineage 2 and lineage 4 separately to remove any effect that lineage structure had on the statistics. 
+
+`r kable(resGeneStats_lin2, digits=c(0,5,5,3,3,3,3), caption = "Diversity Statistics of Resistance Genes in Lineage 2")`
+`r kable(resGeneStats_lin4, digits=c(0,5,5,3,3,3,3), caption = "Diversity Statistics of Resistance Genes in Lineage 4")`
+
+
+Some drug resistance genes have very high diversity (*gid*, *ethA*, *pncA*, *rpsL*) in the overall dataset. 
+
+
+####Tajima's D:
+Minimum: `r I(tajima_sum[[1]])`  
+1st Quartile: `r I(tajima_sum[[2]])`  
+Median: `r I(tajima_sum[[3]])`  
+Mean: `r I(tajima_sum[[4]])`  
+3rd Quartile: `r I(tajima_sum[[5]])`  
+Maximum: `r I(tajima_sum[[6]])`  
+
+```{r tajimaDistribution, echo=FALSE}
+
+gene_lengths <- read.delim("../data/geneLengths.txt", header=F)
+colnames(gene_lengths) <- c("gene", "length")
+all_samples_td <- select(stats, gene, td_all)
+colnames(all_samples_td) <- c("gene", "TD_all")
+lineage2_td <- select(lineage2_stats, gene, td_L2)
+colnames(lineage2_td) <- c("gene", "TD_lineage2")
+lineage4_td <- select(lineage4_stats, gene, td_L4)
+colnames(lineage4_td) <- c("gene", "TD_lineage4")
+td <- inner_join(gene_lengths, all_samples_td)
+td <- inner_join(td, lineage2_td)
+td <- inner_join(td, lineage4_td)
+td_long <- melt(td, id.vars = c("gene", "length"))
+
+td_plot <- ggplot(td_long, aes(x=value)) + 
+  geom_histogram(binwidth = 0.1) +
+  xlab("Tajima's D") +
+  facet_wrap(~variable, ncol=1)
+plot(td_plot)
+```
+
+Previously, we have observed that there is a correlation between Tajima's D and gene length in *M. tuberculosis*, which we see in this dataset as well. This pattern also occurs in simulated data of linked genomes when a proportion of sites is under purifying selection.
+
+```{r geneLength, echo=FALSE}
+
+length_plot <- ggplot(td_long, aes(x=log(length), y=value)) + 
+  geom_point() +
+  xlab("Gene length (bp)") + 
+  ylab("Tajima's D") +
+  facet_wrap(~variable, ncol=1)
+plot(length_plot)
+
+# describing the relationship between TD and gene length
+
+td_all <- td_long[td_long$variable == "TD_all",]
+
+#calculate model
+td.lm <- lm(log2(value+3) ~ log2(length), data = td_all, na.action = na.exclude)
+td.res <- resid(td.lm)
+
+
+
+#plot residuals
+td_all$res <- td.res
+res_plot <- ggplot(td_all, aes(x=log(length), y=res)) +
+  geom_point() +
+  geom_hline(yintercept=0) +
+  ylab("Residuals")
+res_hist <- ggplot(td_all, aes(x=res)) +
+  geom_histogram() + 
+  xlab("Residuals")
+plot_grid(res_plot, res_hist)
+
+log_transform_plot <- ggplot(td_all, aes(x=log2(length), y=log2(value+3), label=gene)) +
+  geom_point(aes(colour=res < -0.5144725)) + 
+  geom_smooth(method="lm", se=F) +
+  ggtitle("Log transformation of Tajima's D and gene length") +
+  geom_text(data=subset(td_all, gene %in% resistanceGenes & res < -0.5144725 ), 
+             hjust = 0, 
+             nudge_x = 0.05)
+
+plot(log_transform_plot)
+
+td_all <- td_all %>% mutate(pr_ted_res = rank(res)/length(res))
+
+drug_resistant_residuals <- td_all[td_all$gene %in% resistanceGenes,]
+
+
+# alternate approach: remove positive values and flip the sign of negative values
+neg_td <- filter(td_long, value < 0, variable == "TD_all")
+neg_td$value <- neg_td$value * -1
+
+#calculate model
+neg_td.lm <- lm(log2(value) ~ log2(length), data = neg_td, na.action = na.exclude)
+neg_td.res <- resid(neg_td.lm)
+
+
+
+#plot residuals
+neg_td$res <- neg_td.res
+neg_res_plot <- ggplot(neg_td, aes(x=log(length), y=res)) +
+  geom_point() +
+  geom_hline(yintercept=0) +
+  ylab("Residuals")
+neg_res_hist <- ggplot(neg_td, aes(x=res)) +
+  geom_histogram() + 
+  xlab("Residuals")
+plot_grid(neg_res_plot, neg_res_hist)
+
+log_transform_plot_neg <- ggplot(neg_td, aes(x=log2(length), y=log2(value), label=gene)) +
+  geom_point(aes(colour=res > 0.5144725)) + 
+  geom_smooth(method="lm", se=F) +
+  ggtitle("Log transformation of Tajima's D and gene length") +
+  geom_text(data=subset(neg_td, gene %in% resistanceGenes & res > 0.5144725 ), 
+             hjust = 0, 
+             nudge_x = 0.05)
+
+plot(log_transform_plot_neg)
+
+
+
+```
+`r kable(drug_resistant_residuals)`
+
+###Comparison of drug resistant and sensitive populations
+For each drug where susceptibility information was available, we created alignments of drug resistant and susceptible isolates (isolates with unknown susceptibility were not included). Our hypothesis was that drug resistance conferring genes would have more extreme measures of diversity in drug resistant isolates compared to drug susceptible isolates. We also hypothesized that drug resistance genes would be among Fst outliers using drug resistant and drug susceptible isolates as populations. Genewise pi and theta were calculated using egglib.i We performed these analysis in the whole dataset as well as lineage specific alignments.
+
+
+###Overall diversity of drug resistant vs. susceptible isolates
+
+```{r populationAnalysis, echo=FALSE}
+
+genewise_pi <- read.table("../data/genewise_pi.txt", 
+                          header=FALSE, 
+                          sep="\t",
+                          stringsAsFactors=FALSE,
+                          na.strings = "None")
+colnames(genewise_pi) <- c("drug", "gene", "resistant", "susceptible")
+genewise_pi_long <- melt(genewise_pi, id=c("drug", "gene"))
+colnames(genewise_pi_long) <- c("drug", "gene", "susceptibility", "pi")
+genewise_theta <- read.table("../data/genewise_theta.txt", 
+                             header=FALSE, 
+                             sep="\t",
+                             stringsAsFactors = FALSE,
+                             na.strings = "None")
+colnames(genewise_theta) <- c("drug", "gene", "resistant", "susceptible")
+genewise_theta_long <- melt(genewise_theta, id=c("drug", "gene"))
+colnames(genewise_theta_long) <- c("drug", "gene", "susceptibility", "theta")
+by_drug_pi <- group_by(genewise_pi, drug)
+by_drug_theta <- group_by(genewise_theta, drug)
+
+pi_summary <- summarise(by_drug_pi, 
+                        mean_resistant = mean(resistant, na.rm=TRUE),
+                        mean_susceptible = mean(susceptible, na.rm=TRUE),
+                        mean_ratio = mean_resistant/mean_susceptible,
+                        median_resistant = median(resistant, na.rm=TRUE),
+                        median_susceptible = median(susceptible, na.rm=TRUE),
+                        median_ratio = median_resistant/median_susceptible,
+                        skewness_resistant = skewness(resistant, na.rm=TRUE),
+                        skewness_susceptbile = skewness(susceptible, na.rm=TRUE),
+                        kurtosis_resistant = kurtosis(resistant, na.rm=TRUE),
+                        kurtosis_susceptible = kurtosis(susceptible, na.rm=TRUE))
+theta_summary <- summarise(by_drug_theta,
+                           mean_resistant = mean(resistant, na.rm=TRUE),
+                           mean_susceptible=mean(susceptible, na.rm=TRUE),
+                           ratio = mean_resistant/mean_susceptible)
+
+lineage2_genewise_pi <- read.table("../data/lineage2_genewise_pi.txt", 
+                          header=FALSE, 
+                          sep="\t",
+                          stringsAsFactors=FALSE,
+                          na.strings = "None")
+colnames(lineage2_genewise_pi) <- c("drug", "gene", "resistant", "susceptible")
+lineage2_genewise_pi_long <- melt(lineage2_genewise_pi, id=c("drug", "gene"))
+colnames(lineage2_genewise_pi_long) <- c("drug", "gene", "susceptibility", "pi")
+lineage2_genewise_theta <- read.table("../data/lineage2_genewise_theta.txt", 
+                             header=FALSE, 
+                             sep="\t",
+                             stringsAsFactors = FALSE,
+                             na.strings = "None")
+colnames(lineage2_genewise_theta) <- c("drug", "gene", "resistant", "susceptible")
+lineage2_genewise_theta_long <- melt(lineage2_genewise_theta, id=c("drug", "gene"))
+colnames(lineage2_genewise_theta_long) <- c("drug", "gene", "susceptibility", "theta")
+lineage2_by_drug_pi <- group_by(lineage2_genewise_pi, drug)
+lineage2_by_drug_theta <- group_by(lineage2_genewise_theta, drug)
+
+lineage2_pi_summary <- summarise(lineage2_by_drug_pi, 
+                        mean_resistant = mean(resistant, na.rm=TRUE),
+                        mean_susceptible = mean(susceptible, na.rm=TRUE),
+                        ratio = mean_resistant/mean_susceptible)
+lineage2_theta_summary <- summarise(by_drug_theta,
+                           mean_resistant = mean(resistant, na.rm=TRUE),
+                           mean_susceptible=mean(susceptible, na.rm=TRUE),
+                           ratio = mean_resistant/mean_susceptible)
+
+lineage4_genewise_pi <- read.table("../data/lineage4_genewise_pi.txt", 
+                          header=FALSE, 
+                          sep="\t",
+                          stringsAsFactors=FALSE,
+                          na.strings = "None")
+colnames(lineage4_genewise_pi) <- c("drug", "gene", "resistant", "susceptible")
+lineage4_genewise_pi_long <- melt(lineage4_genewise_pi, id=c("drug", "gene"))
+colnames(lineage4_genewise_pi_long) <- c("drug", "gene", "susceptibility", "pi")
+lineage4_genewise_theta <- read.table("../data/lineage4_genewise_theta.txt", 
+                             header=FALSE, 
+                             sep="\t",
+                             stringsAsFactors = FALSE,
+                             na.strings = "None")
+colnames(lineage4_genewise_theta) <- c("drug", "gene", "resistant", "susceptible")
+lineage4_genewise_theta_long <- melt(lineage4_genewise_theta, id=c("drug", "gene"))
+colnames(lineage4_genewise_theta_long) <- c("drug", "gene", "susceptibility", "theta")
+lineage4_by_drug_pi <- group_by(lineage4_genewise_pi, drug)
+lineage4_by_drug_theta <- group_by(lineage4_genewise_theta, drug)
+
+lineage4_pi_summary <- summarise(lineage4_by_drug_pi, 
+                        mean_resistant = mean(resistant, na.rm=TRUE),
+                        mean_susceptible = mean(susceptible, na.rm=TRUE),
+                        ratio = mean_resistant/mean_susceptible)
+lineage4_theta_summary <- summarise(lineage4_by_drug_theta,
+                           mean_resistant = mean(resistant, na.rm=TRUE),
+                           mean_susceptible=mean(susceptible, na.rm=TRUE),
+                           ratio = mean_resistant/mean_susceptible)
+
+overall_pi_plot <- ggplot(filter(genewise_pi_long), aes(drug, pi, color=susceptibility)) +
+  geom_boxplot() +
+  scale_y_log10()
+lineage2_pi_plot <- ggplot(lineage2_genewise_pi_long, aes(drug, pi, color=susceptibility)) +
+  geom_boxplot() + 
+  scale_y_log10()
+lineage4_pi_plot <- ggplot(lineage4_genewise_pi_long, aes(drug, pi, color=susceptibility)) +
+  geom_boxplot() + 
+  scale_y_log10()
+
+overall_theta_plot <- ggplot(genewise_theta_long, aes(drug, theta, color=susceptibility)) +
+  geom_boxplot() + 
+  scale_y_log10()
+lineage2_theta_plot <- ggplot(lineage2_genewise_theta_long, aes(drug, theta, color=susceptibility)) +
+  geom_boxplot() + 
+  scale_y_log10()
+lineage4_theta_plot <- ggplot(lineage4_genewise_theta_long, aes(drug, theta, color=susceptibility)) +
+  geom_boxplot() + 
+  scale_y_log10()
+
+plot_grid(overall_pi_plot, lineage2_pi_plot, lineage4_pi_plot, labels = c("A", "2", "4"), nrow=3, align="v")
+plot_grid(overall_theta_plot, lineage2_theta_plot, lineage4_theta_plot, labels = c("A", "2", "4"), nrow=3, align="v")
+
+bydrug_stats <- read.table("../data/bydrug_stats.txt", header=F)
+colnames(bydrug_stats) <- c("drug", "susceptibility", "theta", "pi", "TajimaD")
+bydrug_stats.wide <- dcast(bydrug_stats, drug ~ susceptibility, value.var = "pi")
+t.test(bydrug_stats.wide$resistant, bydrug_stats.wide$susceptible, paired=T)
+
+genewise_pi_zero_counts <- genewise_pi %>% group_by(drug) %>% summarize(resistant = sum(resistant == 0, na.rm=T), susceptible = sum(susceptible == 0, na.rm=T))
+genewise_pi_zero_counts <- mutate(genewise_pi_zero_counts, diff = resistant-susceptible)
+genewise_pi_zero_counts.melt <- melt(genewise_pi_zero_counts, id=c("drug", "diff"))
+zero_plot <- ggplot(genewise_pi_zero_counts.melt, aes(x=variable, y=value)) +
+  geom_boxplot() +
+  xlab("") +
+  ylab("Genes with no diversity")
+plot_grid(zero_plot, overall_pi_plot, labels = c("A", "B"), nrow=1, align="h", rel_widths = c(1,2))
+```
+
+Conclusion: Susceptible and resistant isolates have similar levels of diversity (resistant isolates might actually be more diverse) in this data set. The implication is that drug resistance arises de novo in many cases.  Our hypothesis is that there may be diversifying selection for compensatory mutations in resistant isolates that causes them to be more diverse. A caveat is that these data sets were specifically targeting drug resistant isolates, and the suceptible isolates may be a biased sample. 
+
+From cohen et al.: "Strains were chosen for study inclusion on the basis of a predetermined
+drug resistance pattern so that the dataset was heavily weighted toward drugresistant
+strains rather than accurately reflecting the epidemiology of the region."
+
+From Casali et al.: "Comparison of patient epidemiological data indicated that this sample was representative of the entire population and covered the distribution of patients with tuberculosis across the whole region."
+
+The isolates from Casali et al. were primarily lineage 2, so that may be why lineage 2 appears to have a smaller difference in diversity than lineage 4.
+
+```{r zeroDiversityGenes}
+
+noDiversity_entireDataset <- filter(stats, pi_all == 0)
+noDiversity_resistantIsolates <- group_by(genewise_pi, gene) %>% 
+  summarise(resistant = sum(resistant), susceptible = sum(susceptible)) %>%
+  filter(resistant == 0)
+noDiversity_susceptibleIsolates <- group_by(genewise_pi, gene) %>% 
+  summarise(resistant = sum(resistant), susceptible = sum(susceptible)) %>%
+  filter(susceptible == 0)
+
+byDrug_noDiversity_resistantIsolates <- filter(genewise_pi, 
+                                               resistant == 0)
+byDrug_noDiversity_count <- group_by(byDrug_noDiversity_resistantIsolates, drug) %>%
+  summarise(count = n(), count_resistant_specific = count-109)
+
+susceptibleDiversity <- rbind(transform(genewise_pi, resistant = 1), byDrug_noDiversity_resistantIsolates)
+ggplot(susceptibleDiversity, aes(x=resistant, y=susceptible)) + 
+  geom_boxplot(aes(group=resistant)) + facet_wrap(~drug)
+
+drugs <- unique(genewise_pi$drug)
+first_line = c("INH", "RIF", "PZA", "EMB", "STR")
+bottom_susceptible <- data.frame(drug=character(), 
+                                 gene = character(), 
+                                 resistant=numeric(),
+                                 susceptible=numeric())
+for (d in drugs){
+  c <- byDrug_noDiversity_count[byDrug_noDiversity_count$drug == d,]$count
+  bot <- filter(genewise_pi, drug == d) %>% top_n(-c, susceptible)
+  bottom_susceptible <- rbind(bottom_susceptible, bot)
+  
+}
+
+
+byDrug_noDiversity_resistantIsolates_sample <- filter(bottom_susceptible, 
+                                               resistant == 0)
+byDrug_noDiversity_count_sample <- group_by(byDrug_noDiversity_resistantIsolates_sample, drug) %>%
+  summarise(count = n(), count_resistant_specific = count-109)
+
+noDiversity_resistantIsolates_sample <- group_by(bottom_susceptible, gene) %>% 
+  summarise(resistant = sum(resistant), susceptible = sum(susceptible)) 
+
+drugs <- unique(genewise_pi$drug)
+
+genewise_pi_bydrug_weighted <- group_by(genewise_pi, drug) %>% na.omit() %>%
+  mutate(weight = 1-(susceptible/sum(susceptible, na.rm=T)))
+
+weighted_sample <- function(x){
+  random_weighted <- data.frame(drug=character(), 
+                              gene = character(), 
+                              resistant=numeric(),
+                              susceptible=numeric(),
+                              weight=numeric())
+  for(d in first_line){
+    c <- byDrug_noDiversity_count[byDrug_noDiversity_count$drug == d,]$count
+    samp <- sample_n(filter(genewise_pi_bydrug_weighted, drug==d), c, weight=weight)
+    random_weighted <- bind_rows(random_weighted, samp)
+    }
+  d <- group_by(random_weighted, gene) %>% summarise(count = n())
+  length(d$count[d$count==5])
+}
+
+weighted_sample()
+
+ggplot(filter(genewise_pi_bydrug_weighted, gene %in% noDiversity_resistantIsolates$gene), aes(x= drug, y=susceptible/max(susceptible))) + geom_boxplot(aes(group=drug))
+
+```
+
+####Diversity of drug resistance genes in resistant vs. susceptible isolates
+
+```{r drugResistanceGenes_popAnalysis, fig.height = 9, fig.width=10, echo=FALSE}
+
+first_line = c("INH", "RIF", "EMB", "PZA", "STR")
+
+dr_pi <- genewise_pi[genewise_pi$gene %in% resistanceGenes,]
+dr_pi <- dr_pi[dr_pi$drug %in% first_line,]
+dr_theta <- genewise_theta[genewise_theta$gene %in% resistanceGenes,]
+dr_theta <- dr_theta[dr_theta$drug %in% first_line,]
+
+dr_pi.melt <- melt(dr_pi)
+dr_theta.melt <- melt(dr_theta)
+dr_pi <- mutate(dr_pi, ratio = resistant/susceptible)
+dr_theta <- mutate(dr_theta, ratio = resistant/susceptible)
+
+dr_pi$gene <- factor(dr_pi$gene, levels = dr_pi$gene[order(dr_pi$ratio)])
+dr_theta$gene <- factor(dr_theta$gene, levels = dr_theta$gene[order(dr_theta$ratio)])
+
+dr_pi.plot <- ggplot(dr_pi.melt, aes(x=gene, y=value)) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") +ylab("Pi") +
+  ggtitle("All Isolates Resistance Genes Pi")
+
+dr_pi_ratio.plot <- ggplot(dr_pi, aes(x=gene, y=log10(ratio))) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("Drug resistance gene") + ylab("Pi ratio (log 10)") +
+  ggtitle("All Isolates Resistant/Susceptbile Pi") +
+  facet_wrap(~drug, ncol=1)
+  
+dr_theta.plot <- ggplot(dr_theta.melt, aes(x=gene, y=value)) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") +ylab("Theta") +
+  ggtitle("All Isolates Resistance Genes Theta")
+
+dr_theta_ratio.plot <- ggplot(dr_theta, aes(x=gene, y=log10(ratio))) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("Drug resistance gene") + ylab("Theta ratio (log 10)") +
+  ggtitle("All Isolates Resistant/Susceptbile Theta") +
+  facet_wrap(~drug, ncol=1)
+
+#plot(dr_pi.plot)
+plot(dr_pi_ratio.plot)
+#plot(dr_theta.plot)
+plot(dr_theta_ratio.plot)
+
+dr_pi_lin2 <- lineage2_genewise_pi[lineage2_genewise_pi$gene %in% resistanceGenes,]
+dr_pi_lin2 <- dr_pi_lin2[dr_pi_lin2$drug %in% first_line,]
+
+dr_theta_lin2 <- lineage2_genewise_theta[lineage2_genewise_theta$gene %in% resistanceGenes,]
+dr_theta_lin2 <- dr_theta_lin2[dr_theta_lin2$drug %in% first_line,]
+
+dr_pi_lin2.melt <- melt(dr_pi_lin2)
+dr_theta_lin2.melt <- melt(dr_theta_lin2)
+
+dr_pi_lin2 <- mutate(dr_pi_lin2, ratio = resistant/susceptible)
+dr_theta_lin2 <- mutate(dr_theta_lin2, ratio = resistant/susceptible)
+
+dr_pi_lin2$gene <- factor(dr_pi_lin2$gene, levels = dr_pi_lin2$gene[order(dr_pi_lin2$ratio)])
+dr_theta_lin2$gene <- factor(dr_theta_lin2$gene, levels = dr_theta_lin2$gene[order(dr_theta_lin2$ratio)])
+
+dr_pi_lin2.plot <- ggplot(dr_pi_lin2.melt, aes(x=gene, y=value)) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") +ylab("Pi") +
+  ggtitle("Lineage 2 Pi")
+
+dr_pi_ratio_lin2.plot <- ggplot(dr_pi_lin2, aes(x=gene, y=log10(ratio))) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("Drug resistance gene") + ylab("Pi ratio (log 10)") +
+  ggtitle("Lineage 2 Resistant/Susceptbile Pi") +
+  facet_wrap(~drug, ncol=1)
+  
+dr_theta_lin2.plot <- ggplot(dr_theta_lin2.melt, aes(x=gene, y=value)) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") +ylab("Theta") +
+  ggtitle("Lineage 2 Resistance Genes Theta")
+
+dr_theta_ratio_lin2.plot <- ggplot(dr_theta_lin2, aes(x=gene, y=log10(ratio))) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("Drug resistance gene") + ylab("Theta ratio (log 10)") +
+  ggtitle("Lineage 2 Resistant/Susceptbile Theta") +
+  facet_wrap(~drug, ncol=1)
+
+plot(dr_pi_ratio_lin2.plot)
+plot(dr_theta_ratio_lin2.plot)
+
+dr_pi_lin4 <- lineage4_genewise_pi[lineage4_genewise_pi$gene %in% resistanceGenes,]
+dr_pi_lin4 <- dr_pi_lin4[dr_pi_lin4$drug %in% first_line,]
+
+dr_theta_lin4 <- lineage4_genewise_theta[lineage4_genewise_theta$gene %in% resistanceGenes,]
+dr_theta_lin4 <- dr_theta_lin4[dr_theta_lin4$drug %in% first_line,]
+
+dr_pi_lin4.melt <- melt(dr_pi_lin4)
+dr_theta_lin4.melt <- melt(dr_theta_lin4)
+
+dr_pi_lin4 <- mutate(dr_pi_lin4, ratio = resistant/susceptible)
+dr_theta_lin4 <- mutate(dr_theta_lin4, ratio = resistant/susceptible)
+
+dr_pi_lin4$gene <- factor(dr_pi_lin4$gene, levels = dr_pi_lin4$gene[order(dr_pi_lin4$ratio)])
+dr_theta_lin4$gene <- factor(dr_theta_lin4$gene, levels = dr_theta_lin4$gene[order(dr_theta_lin4$ratio)])
+
+dr_pi_lin4.plot <- ggplot(dr_pi_lin4.melt, aes(x=gene, y=value)) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") +ylab("Pi") +
+  ggtitle("Lineage 4 Resistance Genes Pi")
+
+dr_pi_ratio_lin4.plot <- ggplot(dr_pi_lin4, aes(x=gene, y=log10(ratio))) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("Drug resistance gene") + ylab("Pi ratio (log 10)") +
+  ggtitle("Lineage 4 Resistant/Susceptible Pi") +
+  facet_wrap(~drug, ncol=1)
+  
+dr_theta_lin4.plot <- ggplot(dr_theta_lin4.melt, aes(x=gene, y=value)) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") +ylab("Theta") +
+  ggtitle("Lineage 4 Resistance Genes Theta")
+
+dr_theta_ratio_lin4.plot <- ggplot(dr_theta_lin4, aes(x=gene, y=log10(ratio))) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("Drug resistance gene") + ylab("Theta ratio (log 10)") +
+  ggtitle("Lineage 4 Resistant/Susceptbile Theta") +
+  facet_wrap(~drug, ncol=1)
+
+plot(dr_pi_ratio_lin4.plot)
+plot(dr_theta_ratio_lin4.plot)
+
+#heatmaps of resistant/susceptible ratios
+dr_pi <- mutate(dr_pi, 
+                resistant = replace(resistant, which(resistant == 0), 1e-6),
+                susceptible = replace(susceptible, which(susceptible == 0), 1e-6))
+dr_pi <- mutate(dr_pi, ratio=resistant/susceptible)
+
+dr_pi.matrix <- select(dr_pi, drug, gene, ratio)
+dr_pi.cast <- dcast(dr_pi.matrix, gene~drug)
+rownames(dr_pi.cast) <- dr_pi.cast$gene
+dr_pi.matrix <- data.matrix(dr_pi.cast[,-1])
+dr_pi.matrix <- dr_pi.matrix[order(rownames(dr_pi.matrix)),]
+superheat(log10(dr_pi.matrix), 
+          heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"),
+          heat.lim = c(-1.5, 1.5), 
+          extreme.values.na = FALSE, 
+          grid.hline.col = "white", 
+          grid.vline.col = "white", 
+          legend.breaks = c(-1.0, -0.5, 0.0, 0.5, 1.0), 
+          left.label.col = "white", 
+          bottom.label.col = "white",
+          pretty.order.rows = F,
+          pretty.order.cols = F,
+          order.rows = order(dr_pi.matrix[,1]))
+
+dr_pi_lin2 <- mutate(dr_pi_lin2, 
+                resistant = replace(resistant, which(resistant == 0), 1e-6),
+                susceptible = replace(susceptible, which(susceptible == 0), 1e-6))
+dr_pi_lin2 <- mutate(dr_pi_lin2, ratio_lin2=resistant/susceptible) %>% select(drug, gene, ratio_lin2)
+dr_pi_lin2.matrix <- select(dr_pi_lin2, drug, gene, ratio_lin2)
+dr_pi_lin2.matrix <- dcast(dr_pi_lin2.matrix, gene~drug)
+rownames(dr_pi_lin2.matrix) <- dr_pi_lin2.matrix$gene
+dr_pi_lin2.matrix <- data.matrix(dr_pi_lin2.matrix[,-1])
+superheat(log10(dr_pi_lin2.matrix), heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"), heat.lim = c(-1.5, 1.5), extreme.values.na = FALSE)
+
+dr_pi_lin4 <- mutate(dr_pi_lin4, 
+                resistant = replace(resistant, which(resistant == 0), 1e-6),
+                susceptible = replace(susceptible, which(susceptible == 0), 1e-6))
+dr_pi_lin4 <- mutate(dr_pi_lin4, ratio_lin4=resistant/susceptible) %>% select(drug, gene, ratio_lin4)
+dr_pi_lin4.matrix <- select(dr_pi_lin4, drug, gene, ratio_lin4)
+dr_pi_lin4.matrix <- dcast(dr_pi_lin4.matrix, gene~drug)
+rownames(dr_pi_lin4.matrix) <- dr_pi_lin4.matrix$gene
+dr_pi_lin4.matrix <- data.matrix(dr_pi_lin4.matrix[,-1])
+superheat(log10(dr_pi_lin4.matrix), heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"), heat.lim = c(-1.5, 1.5), extreme.values.na = FALSE)
+
+dr_pi_lineages <- inner_join(dr_pi_lin2, dr_pi_lin4)
+dr_pi_lineages <- mutate(dr_pi_lineages, ratio = ratio_lin2/ratio_lin4)
+dr_pi_lineages.matrix <- select(dr_pi_lineages, drug, gene, ratio)
+dr_pi_lineages.matrix <- dcast(dr_pi_lineages.matrix, gene~drug)
+rownames(dr_pi_lineages.matrix) <- dr_pi_lineages.matrix$gene
+dr_pi_lineages.matrix <- data.matrix(dr_pi_lineages.matrix[,-1])
+superheat(log10(dr_pi_lineages.matrix), 
+          heat.pal = c("#a6611a", "#dfc27d", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#80cdc1", "#018571"), 
+          heat.lim = c(-1.5, 1.5), 
+          extreme.values.na = FALSE,
+          grid.hline.col = "white", 
+          grid.vline.col = "white", 
+          legend.breaks = c(-1.0, -0.5, 0.0, 0.5, 1.0), 
+          left.label.col = "white", 
+          bottom.label.col = "white",
+          pretty.order.rows = F,
+          pretty.order.cols = F,
+          order.rows = order(dr_pi.matrix[,1]))
+
+
+#linear regression of genewise diversity in susceptible vs. resistant strains
+
+genewise_res_v_susc <- group_by(na.omit(genewise_pi), drug) %>%
+  do(model = lm(resistant ~ susceptible, data=.)) %>%
+  do((function(mod) {
+    data.frame(resid = residuals(mod$model))
+  })(.))
+
+# I DON'T THINK THIS IS WORKING CORRECTLY. RESIDUAL VALUES SEEM WRONG!!!!
+
+genewise_res_v_susc <- cbind(na.omit(genewise_pi), genewise_res_v_susc) %>%
+  group_by(drug) %>%
+  mutate(perc = rank(resid)/length(resid))
+
+res_v_susc.matrix <- filter(genewise_res_v_susc, gene %in% resistanceGenes, drug %in% first_line) %>%
+  select(drug, gene, perc)
+res_v_susc.cast <- dcast(res_v_susc.matrix, gene~drug)
+rownames(res_v_susc.cast) <- res_v_susc.cast$gene
+res_v_susc.matrix <- data.matrix(res_v_susc.cast[,-1])
+res_v_susc.matrix <- res_v_susc.matrix[order(rownames(res_v_susc.matrix)),]
+superheat(res_v_susc.matrix, 
+          heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"),
+#heat.lim = c(-1.5, 1.5), 
+          extreme.values.na = FALSE, 
+          grid.hline.col = "white", 
+          grid.vline.col = "white", 
+          legend.breaks = c(0.01, 0.05, 0.1, 0.5, 0.9, 0.95, 0.99), 
+          heat.pal.values = c(0.0, 0.05, 0.1, 0.5, 0.9, 0.95, 1.0),
+          left.label.col = "white", 
+          bottom.label.col = "white",
+          pretty.order.rows = F,
+          pretty.order.cols = F,
+          order.rows = order(res_v_susc.matrix[,1]))
+```
+
+*pncA* has the most extreme patterns of diversity in all data sets. *pncA* is a large genetic target for resistance mutations. In this case it appears that drug pressure is acting like diversifying selection. To follow up, I would like to compare *pncA* in totally susceptible isolates, PZA monoresistant isolates, and PZA susceptible isolates that are resistant to other first line drugs. 
+
+
+####Diversity of ribosomal proteins
+
+A recent study in *M. smegmatis* described mutations in ribosomal proteins that conferred multidrug resistance (Gomez et al. 2017). I compared diversity in these genes between resistant and susceptible isolates.
+
+```{r ribosome, fig.height = 9, fig.width=10}
+
+ribo_pi <- filter(genewise_pi, grepl("rps|rpl", gene))
+ribo_theta <- filter(genewise_theta, grepl("rps|rpl", gene))
+
+ribo_pi_firstLine <- filter(ribo_pi, drug %in% first_line)
+ribo_theta_firstLine <- filter(ribo_theta, drug %in% first_line)
+
+ribo_pi_firstLine.melt <- melt(ribo_pi_firstLine)
+ribo_theta_firstLine.melt <- melt(ribo_theta_firstLine)
+
+ribo_pi.plot <- ggplot(ribo_pi_firstLine.melt, aes(x=gene, y=log10(value))) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Ribosome gene") +ylab("Pi") +
+  ggtitle("All Isolates Ribosome Genes Pi")
+
+ribo_theta.plot <- ggplot(ribo_theta_firstLine.melt, aes(x=gene, y=log10(value))) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Ribosome gene") +ylab("Theta") +
+  ggtitle("All Isolates Ribosome Genes Theta")
+
+plot(ribo_pi.plot)
+plot(ribo_theta.plot)
+
+ribo_pi_lin2 <- filter(lineage2_genewise_pi, grepl("rps|rpl", gene))
+ribo_theta_lin2 <- filter(lineage2_genewise_theta, grepl("rps|rpl", gene))
+
+ribo_pi_lin2_firstLine <- filter(ribo_pi_lin2, drug %in% first_line)
+ribo_theta_lin2_firstLine <- filter(ribo_theta_lin2, drug %in% first_line)
+
+ribo_pi_lin2_firstLine.melt <- melt(ribo_pi_lin2_firstLine)
+ribo_theta_lin2_firstLine.melt <- melt(ribo_theta_lin2_firstLine)
+
+ribo_pi_lin2.plot <- ggplot(ribo_pi_lin2_firstLine.melt, aes(x=gene, y=log10(value))) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Ribosome gene") +ylab("pi_lin2") +
+  ggtitle("All Isolates Ribosome Genes pi_lin2")
+
+ribo_theta_lin2.plot <- ggplot(ribo_theta_lin2_firstLine.melt, aes(x=gene, y=log10(value))) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Ribosome gene") +ylab("theta_lin2") +
+  ggtitle("All Isolates Ribosome Genes theta_lin2")
+
+plot(ribo_pi_lin2.plot)
+plot(ribo_theta_lin2.plot)
+
+ribo_pi_lin4 <- filter(lineage4_genewise_pi, grepl("rps|rpl", gene))
+ribo_theta_lin4 <- filter(lineage4_genewise_theta, grepl("rps|rpl", gene))
+
+ribo_pi_lin4_firstLine <- filter(ribo_pi_lin4, drug %in% first_line)
+ribo_theta_lin4_firstLine <- filter(ribo_theta_lin4, drug %in% first_line)
+
+ribo_pi_lin4_firstLine.melt <- melt(ribo_pi_lin4_firstLine)
+ribo_theta_lin4_firstLine.melt <- melt(ribo_theta_lin4_firstLine)
+
+ribo_pi_lin4.plot <- ggplot(ribo_pi_lin4_firstLine.melt, aes(x=gene, y=log10(value))) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Ribosome gene") +ylab("pi_lin4") +
+  ggtitle("All Isolates Ribosome Genes pi_lin4")
+
+ribo_theta_lin4.plot <- ggplot(ribo_theta_lin4_firstLine.melt, aes(x=gene, y=log10(value))) +
+  geom_point(aes(color=variable)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  facet_wrap(~drug, ncol=1) + xlab("Ribosome gene") +ylab("theta_lin4") +
+  ggtitle("All Isolates Ribosome Genes theta_lin4")
+
+plot(ribo_pi_lin4.plot)
+plot(ribo_theta_lin4.plot)
+```
+
+####Fst outlier analysis
+
+I used vcflib to calculate wcFst for resistant and susceptible populations of each drug. Our hypothesis is that drug resistance genes should contain more Fst outliers than other genes in the M. tb genome.
+
+```{r fst, echo=FALSE}
+
+fst_limits <- read.table("../data/fst_cutoffs.txt", header=TRUE)
+gaps <- scan("../data/gappedPositions_5percThreshold.txt", what = numeric())
+
+fst <- read.table("../data/wcFst.txt", header=FALSE)
+snps <- read.table("../data/mtb_drugResistance_snps.txt", header=FALSE)
+colnames(fst) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+colnames(snps) <- c("location", "type", "gene")
+fst <- fst %>% distinct(location, drug, .keep_all=TRUE)
+fst$wcFst[fst$wcFst < 0] <- 0
+fst <- inner_join(fst,fst_limits) %>% filter(!location %in% gaps)
+fst_with_genes <- inner_join(fst, snps)
+fst_by_drug <- group_by(fst_with_genes, drug) %>% mutate(fst_pr = rank(wcFst)/length(wcFst)) 
+top_fst <- filter(fst_by_drug, fst_pr > 0.99, wcFst > all) %>% 
+  select(location, wcFst, drug, gene, type, fst_pr)
+top_fst_resistanceGenes <- filter(top_fst, gene %in% resistanceGenes)
+top_fst_otherGenes <- filter(top_fst, !gene %in% resistanceGenes)
+
+fst_lin2 <- read.table("../data/wcFst_lineage2.txt", header=FALSE)
+colnames(fst_lin2) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+fst_lin2 <- fst_lin2 %>% distinct(location, drug, .keep_all=TRUE)
+fst_lin2$wcFst[fst_lin2$wcFst < 0] <- 0
+fst_lin2 <- inner_join(fst_lin2,fst_limits) %>% filter(!location %in% gaps)
+fst_with_genes_lin2 <- inner_join(fst_lin2, snps)
+fst_by_drug_lin2 <- group_by(fst_with_genes_lin2, drug) %>% mutate(fst_pr = rank(wcFst)/length(wcFst)) 
+top_fst_lin2 <- filter(fst_by_drug_lin2, fst_pr > 0.99, wcFst > lineage2) %>% 
+  select(location, wcFst, drug, gene, type, fst_pr)
+top_fst_resistanceGenes_lin2 <- filter(top_fst_lin2, gene %in% resistanceGenes)
+top_fst_otherGenes_lin2 <- filter(top_fst_lin2, !gene %in% resistanceGenes)
+
+fst_lin4 <- read.table("../data/wcFst_lineage4.txt", header=FALSE)
+colnames(fst_lin4) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+fst_lin4 <- fst_lin4 %>% distinct(location, drug, .keep_all=TRUE)
+fst_lin4$wcFst[fst_lin4$wcFst < 0] <- 0
+fst_lin4 <- inner_join(fst_lin4,fst_limits) %>% filter(!location %in% gaps)
+fst_with_genes_lin4 <- inner_join(fst_lin4, snps)
+fst_by_drug_lin4 <- group_by(fst_with_genes_lin4, drug) %>% mutate(fst_pr = rank(wcFst)/length(wcFst)) 
+top_fst_lin4 <- filter(fst_by_drug_lin4, fst_pr > 0.99, wcFst > lineage4) %>% 
+  select(location, wcFst, drug, gene, type, fst_pr)
+top_fst_resistanceGenes_lin4 <- filter(top_fst_lin4, gene %in% resistanceGenes)
+top_fst_otherGenes_lin4 <- filter(top_fst_lin4, !gene %in% resistanceGenes)
+
+```
+
+
+####Insertions and Deletions
+In addition to SNPs, pilon also calls insertions and deletions from mapped reads. I used emu to normalize the indels in all isolates. Using the normalized indels coded as 0/1 for presence or absence, I performed Fst analysis for resistance to each drug in the whole dataset, as well as lineage 2 and lineage 4.
+
+```{r fst_indel, echo=FALSE}
+
+indel_descriptions <- read.table("../data/indel_descriptions.txt", header=FALSE)
+colnames(indel_descriptions) <- c("name", "type", "genes")
+indel_descriptions$location <- as.integer(row.names(indel_descriptions))
+
+
+fst_indel <- read.table("../data/wcFst_indels.txt", header=FALSE)
+colnames(fst_indel) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+indel_descriptions_QCpass <- filter(indel_descriptions, location %in% fst_indel$location)
+fst_indel <- inner_join(fst_indel, indel_descriptions)
+fst_indel$wcFst[fst_indel$wcFst < 0] <- 0
+fst_indel_by_drug <- group_by(fst_indel, drug)
+quantile_indel_by_drug <- summarise(fst_indel_by_drug, quantile(wcFst,  c(0.999)))
+top_1_indel <- filter(fst_indel_by_drug, wcFst > quantile(wcFst, c(0.99)))
+fst_indel_geneCounts <- group_by(indel_descriptions, genes) %>% 
+  summarize(indel_count = n()) %>%
+  arrange(desc(indel_count))
+fst_indel_geneCounts_drugRes <- filter(fst_indel_geneCounts, grepl(paste(resistanceGenes,collapse="|"),genes))
+fst_indel_geneCounts_intergenic <- filter(fst_indel_geneCounts, grepl("-",genes))
+
+fst_indel_lin2 <- read.table("../data/wcFst_indels_lineage2.txt", header=FALSE)
+colnames(fst_indel_lin2) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+fst_indel_lin2 <- inner_join(fst_indel_lin2, indel_descriptions)
+fst_indel_lin2$wcFst[fst_indel_lin2$wcFst < 0] <- 0
+fst_indel_lin2_by_drug <- group_by(fst_indel_lin2, drug)
+quantile_indel_lin2_by_drug <- summarise(fst_indel_lin2_by_drug, quantile(wcFst,  c(0.999)))
+top_1_indel_lin2 <- filter(fst_indel_lin2_by_drug, wcFst > quantile(wcFst, c(0.999)))
+
+fst_indel_lin4 <- read.table("../data/wcFst_indels_lineage4.txt", header=FALSE)
+colnames(fst_indel_lin4) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+fst_indel_lin4 <- inner_join(fst_indel_lin4, indel_descriptions)
+fst_indel_lin4$wcFst[fst_indel_lin4$wcFst < 0] <- 0
+fst_indel_lin4_by_drug <- group_by(fst_indel_lin4, drug)
+quantile_indel_lin4_by_drug <- summarise(fst_indel_lin4_by_drug, quantile(wcFst,  c(0.999)))
+top_1_indel_lin4 <- filter(fst_indel_lin4_by_drug, wcFst > quantile(wcFst, c(0.999)))
+
+unique_indels <- unique(top_1_indel$location)
+
+
+#merged indels
+merged_indel_descriptions <- read.table("../data/merged_indels_description.txt", header=FALSE)
+colnames(merged_indel_descriptions) <- c("index", "genes", "type")
+merged_indel_descriptions$location <- as.integer(row.names(merged_indel_descriptions))
+
+
+fst_merged_indel <- read.table("../data/wcFst_mergedIndels.txt", header=FALSE)
+colnames(fst_merged_indel) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+merged_indel_descriptions_QCpass <- filter(merged_indel_descriptions, location %in% fst_merged_indel$location)
+fst_merged_indel <- inner_join(fst_merged_indel, merged_indel_descriptions)
+fst_merged_indel$wcFst[fst_merged_indel$wcFst < 0] <- 0
+fst_merged_indel_by_drug <- group_by(fst_merged_indel, drug)
+quantile_merged_indel_by_drug <- summarise(fst_merged_indel_by_drug, quantile(wcFst,  c(0.999)))
+top_1_merged_indel <- filter(fst_merged_indel_by_drug, wcFst > quantile(wcFst, c(0.999)))
+fst_merged_indel_geneCounts <- group_by(merged_indel_descriptions, genes) %>% 
+  summarize(merged_indel_count = n()) %>%
+  arrange(desc(merged_indel_count))
+fst_merged_indel_geneCounts_drugRes <- filter(fst_merged_indel_geneCounts, grepl(paste(resistanceGenes,collapse="|"),genes))
+fst_merged_indel_geneCounts_intergenic <- filter(fst_merged_indel_geneCounts, grepl("-",genes))
+
+fst_merged_indel_lin2 <- read.table("../data/lineage2_wcFst_mergedIndels.txt", header=FALSE)
+colnames(fst_merged_indel_lin2) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+fst_merged_indel_lin2 <- inner_join(fst_merged_indel_lin2, merged_indel_descriptions)
+fst_merged_indel_lin2$wcFst[fst_merged_indel_lin2$wcFst < 0] <- 0
+fst_merged_indel_lin2_by_drug <- group_by(fst_merged_indel_lin2, drug)
+quantile_merged_indel_lin2_by_drug <- summarise(fst_merged_indel_lin2_by_drug, quantile(wcFst,  c(0.999)))
+top_1_merged_indel_lin2 <- filter(fst_merged_indel_lin2_by_drug, wcFst > quantile(wcFst, c(0.999)))
+
+fst_merged_indel_lin4 <- read.table("../data/lineage4_wcFst_mergedIndels.txt", header=FALSE)
+colnames(fst_merged_indel_lin4) <- c("chrom", "location", "freq_resistant", "freq_susceptible", "wcFst", "drug")
+fst_merged_indel_lin4 <- inner_join(fst_merged_indel_lin4, merged_indel_descriptions)
+fst_merged_indel_lin4$wcFst[fst_merged_indel_lin4$wcFst < 0] <- 0
+fst_merged_indel_lin4_by_drug <- group_by(fst_merged_indel_lin4, drug)
+quantile_merged_indel_lin4_by_drug <- summarise(fst_merged_indel_lin4_by_drug, quantile(wcFst,  c(0.999)))
+top_1_merged_indel_lin4 <- filter(fst_merged_indel_lin4_by_drug, wcFst > quantile(wcFst, c(0.999)))
+
+```
+
+`r kable(top_1_indel, caption = "Top 0.1% of Indel Fst")`
+`r kable(top_1_indel_lin2, caption = "Lineage 2: Top 0.1% of Indel Fst")`
+`r kable(top_1_indel_lin4, caption = "Lineage 4: Top 0.1% of Indel Fst")`
+
+####Indels that have high Fst values for the whole dataset
+
+The deletion near *gid* is an Fst outlier in EMB resistance, PZA resistance in the overall dataset and EMB, Et, PZA, RIF, and STR in the lineage 4 dataset. This deletion does not occur in lineage 2. I would like to investigate this further. Is this a deletion that occurred once in lineage 4 and the frequency has increased through clonal expansion or is this a deletion that has occurred many times?
+
+###Homoplasy
+
+```{r homoplasy, echo=FALSE}
+
+homoplasy <- read.table("../data/homoplastic_snps_counts.txt", header=F)
+colnames(homoplasy) <- c("position", "gene", "count")
+homoplasy_dr <- filter(homoplasy, gene %in% resistanceGenes)
+
+homoplasy_gene_counts <- group_by(homoplasy, gene) %>% 
+  filter(gene != "NA") %>%
+  summarise(total_homoplasy=n()) %>%
+  arrange(desc(total_homoplasy)) %>%
+  filter(gene %in% resistanceGenes)
+
+counts <- matrix(data=c(12,48,235,4007),nrow=2)
+fishers_homoplasy <- fisher.test(counts)
+
+counts_lipids <- matrix(data=c(27, 263, 235, 4007),nrow=2)
+fishers_homoplasy <- fisher.test(counts_lipids)
+
+
+homoplasy_indels <- read.table("../data/homoplastic_indels.txt", header=F)
+colnames(homoplasy_indels) <- c("location")
+homoplasy_indels$location <- homoplasy_indels$location + 1
+homoplasy_indels <- inner_join(homoplasy_indels, indel_descriptions_QCpass)
+homoplasy_indel_counts <- group_by(homoplasy_indels, genes) %>%
+  summarise(total_homoplasy=n()) %>%
+  arrange(desc(total_homoplasy))
+homoplasy_indel_drugResistant <- filter(homoplasy_indel_counts, genes %in% resistanceGenes)
+
+counts_indel <- matrix(data=c(3,48,316,4007),nrow=2)
+fishers_homoplasy_indel <- fisher.test(counts_indel)
+
+homoplasy_merged_indels <- read.table("../data/homoplastic_merged_indels.txt", header=F)
+homoplasy_merged_indels_drugResistant <- filter(homoplasy_merged_indels, V2 %in% resistanceGenes)
+
+counts_indel_merged <- matrix(data=c(5,48,487,4007),nrow=2)
+fishers_homoplasy_indel_merged <- fisher.test(counts_indel_merged)
+
+```
+
+Homoplastic SNPs are significantly enriched in drug resistance genes (p = 6.209e-05).
+`r kable(homoplasy_counts)`
+`r kable(homoplasy_indel_drugResistant)`
+
+The frameshift variant that occurs in *gid* in the homoplasy analysis is not the same variant that is shown to be associated with drug resistance via Fst. I think that the best approach will be to combine indels in the same gene before running Fst and homoplasy analyses.
+
+* Genes of interest: Rv1760- CAP resistance, RV1762c EMB, OFL, 4327484 Et, rpoB 761110 KAN, RV1319c PRO, 4338596 PZA upstream of whiB6- which regulates ESX-1
+
+
+```{r summaryTable}
+
+sum.table <- left_join(stats_all, td_all)
+sloppy_targets_td <- filter(sum.table, pr_pi_all > 0.95 | pr_theta_all > 0.95, pr_ted_res < 0.05)$gene
+sloppy_targets_homoplasy <- filter(sum.table, pr_pi_all > 0.95 | pr_theta_all > 0.95, gene %in% homoplasy_gene_counts$gene)$gene
+high_div_L2_resGenes <- filter(sum.table, pr_pi_L2 > 0.95 | pr_theta_L2 > 0.95, gene %in% resistanceGenes)
+high_div_L4_resGenes <- filter(sum.table, pr_pi_L4 > 0.95 | pr_theta_L4 > 0.95, gene %in% resistanceGenes)
+
+top_fst_homoplasy <- filter(top_fst, location %in% homoplasy$position)
+top_fst_homoplasy_L2 <- filter(top_fst_lin2, location %in% homoplasy$position, !location %in% top_fst_homoplasy$location)
+top_fst_homoplasy_L4 <- filter(top_fst_lin4, location %in% homoplasy$position, !location %in% top_fst_homoplasy$location)
+
+fst_homoplasy_table <- select(top_fst_homoplasy, location, gene, type, drug, wcFst) %>%
+  spread(drug, wcFst, fill = NA) %>% 
+  mutate(known = gene %in% resistanceGenes)
+fst_homoplasy_table_L2 <- select(top_fst_homoplasy_L2, location, gene, type, drug, wcFst) %>% 
+  spread(drug, wcFst, fill = NA) %>%
+  mutate(known = gene %in% resistanceGenes)
+
+fst_homoplasy_table_L2_unique <- filter(fst_homoplasy_table_L2, !location %in% fst_homoplasy_table$location)
+fst_homoplasy_table_L4 <- select(top_fst_homoplasy_L4, location, gene, type, drug, wcFst) %>% 
+  spread(drug, wcFst, fill = NA) %>%
+  mutate(known = gene %in% resistanceGenes)
+fst_homoplasy_table_L4_unique <- filter(fst_homoplasy_table_L4, !location %in% fst_homoplasy_table$location)
+
+fst_homoplasy_table$dataset <- "all"
+fst_homoplasy_table_L2_unique$dataset <- "L2"
+fst_homoplasy_table_L4_unique$dataset <- "L4"
+
+fst_homoplasy_table_all <- bind_rows(fst_homoplasy_table, fst_homoplasy_table_L2_unique, fst_homoplasy_table_L4_unique)
+
+colnames(rv_numbers) <- c("gene", "rv")
+colnames(mutations_per_gene) <- c("gene", "total_mutations")
+sum.table.dr <- filter(sum.table, gene %in% resistanceGenes) %>% 
+  left_join(rv_numbers, by = "gene") %>%
+  left_join(mutations_per_gene, by = "gene") %>%
+  select(gene, rv, total_mutations, pr_pi_all, pr_theta_all, pr_ted_res) %>%
+  mutate(homoplasy = gene %in% homoplasy$gene, fst = gene %in% top_fst_homoplasy$gene) %>%
+  arrange(desc(total_mutations))
+```
