@@ -1,5 +1,5 @@
 ---
-title: "Signatures of positive selection at *Mycobacterium tuberculosis* drug resistance loci"
+title: "Signatures of positive selection at drug resistance loci in *Mycobacterium tuberculosis*"
 author: "Tatum Mortimer"
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 output: html_document
@@ -19,22 +19,22 @@ library(beeswarm)
 library(moments)
 ```
 
+Using genes under selection for drug resistance
 ### Study motivation
-
-Using genes under selection for drug resistance in *M. tuberculosis*, we aim to test the ability of population genetics statistics to identify genes under positive selection in bacteria with strictly clonal reproduction.
+ in *M. tuberculosis*, we aim to test the ability of population genetics statistics to identify genes under positive selection in bacteria with strictly clonal reproduction.
 
 ### Data set description
 
-We downloaded sequencing read data from two large surveys of drug resistant *M. tuberculosis* in Russia (Casali et al. 2014) and South Africa (Cohen et al. 2015). Reads were mapped to *M. tuberculosis* H37Rv using our validated reference guided assembly pipeline (https://github.com/tracysmith/RGAPepPipe/). We removed isolates with mean coverage less than 20X, isolates with percentage of the genome covered at 10X less than 90%, isolates where a majority of reads did not map to H37Rv, and isolates where greater than 10% of sites were unknown after mapping. The final dataset contains 1161 M. tuberculosis isolates, primarily from lineage 2 and lineage 4. The alignment was masked to remove repetitive regions including PE/PPE genes.
+We downloaded sequencing read data from two large surveys of drug resistant *M. tuberculosis* in Russia (Casali et al. 2014) and South Africa (Cohen et al. 2015). Reads were mapped to *M. tuberculosis* H37Rv using our validated reference guided assembly pipeline (https://github.com/pepperell-lab/RGAPepPipe/). We removed isolates with mean coverage less than 20X, isolates with percentage of the genome covered at 10X less than 90%, isolates where a majority of reads did not map to H37Rv, and isolates where greater than 10% of sites were unknown after mapping. The final dataset contains 1161 M. tuberculosis isolates, primarily from lineage 2 and lineage 4. The alignment was masked to remove repetitive regions including PE/PPE genes.
 
 ### Phylogenetic analysis
 
-Phylogenetic analysis was performed using FastTree v 2.1.9 (compiled with the double precision option). The tree is currently being reestimated because I'm not positive that a masked alignment was used the first time around.
+Phylogenetic analysis was performed using FastTree v 2.1.9 (compiled with the double precision option). 
 
 ```{r tree, include=TRUE}
 
-fasttree <- read.tree("../data/FINAL_tree.out")
-tree_plot <- ggtree(fasttree, layout = "unrooted") + geom_hilight("SRS415217", fill="blue")
+fasttree <- read.tree("../data/tree.newick")
+tree_plot <- ggtree(fasttree, layout = "unrooted")
 tree_plot
 
 ```
@@ -119,7 +119,7 @@ colnames(stats) <- c("gene",
                      "pr_theta_all", 
                      "pr_TD_all")
 
-resGenesStats <- stats[stats$Alignment %in% resistanceGenes,]
+resGenesStats <- stats[stats$gene %in% resistanceGenes,]
 
 
 pi_plot <- ggplot(stats, aes(x=Pi)) + 
@@ -145,7 +145,7 @@ colnames(lineage2_stats) <- c("gene",
                      "pr_theta_L2", 
                      "pr_TD_L2")
 
-resGeneStats_lin2 <- lineage2_stats[lineage2_stats$Alignment %in% resistanceGenes,]
+resGeneStats_lin2 <- lineage2_stats[lineage2_stats$gene %in% resistanceGenes,]
 
 
 pi_plot_lin2 <- ggplot(lineage2_stats, aes(x=Pi)) + 
@@ -173,7 +173,7 @@ colnames(lineage4_stats) <- c("gene",
                      "pr_theta_L4", 
                      "pr_TD_L4")
 
-resGeneStats_lin4 <- lineage4_stats[lineage4_stats$Alignment %in% resistanceGenes,]
+resGeneStats_lin4 <- lineage4_stats[lineage4_stats$gene %in% resistanceGenes,]
 
 
 pi_plot_lin4 <- ggplot(lineage4_stats, aes(x=Pi)) + 
@@ -186,7 +186,7 @@ stats_all <-  left_join(stats, lineage4_stats, by='gene') %>%
                 left_join(., lineage2_stats, by='gene') 
 
 stats_all.melt <- melt(stats_all, id.var=c("gene"))
-stats_pi <- filter(stats_all.melt, grepl("pi", variable))
+stats_pi <- filter(stats_all.melt, grepl("pi", variable), !grepl("pr", variable))
 
 lineage_t_test <- t.test(lineage2_stats$pi_L2, lineage4_stats$pi_L4, alternative = "less")
 
@@ -206,8 +206,6 @@ I additionally calculated diversity statistics for lineage 2 and lineage 4 separ
 `r kable(resGeneStats_lin2, digits=c(0,5,5,3,3,3,3), caption = "Diversity Statistics of Resistance Genes in Lineage 2")`
 `r kable(resGeneStats_lin4, digits=c(0,5,5,3,3,3,3), caption = "Diversity Statistics of Resistance Genes in Lineage 4")`
 
-
-Some drug resistance genes have very high diversity (*gid*, *ethA*, *pncA*, *rpsL*) in the overall dataset. 
 
 
 ####Tajima's D:
@@ -306,7 +304,7 @@ neg_res_plot <- ggplot(neg_td, aes(x=log(length), y=res)) +
 neg_res_hist <- ggplot(neg_td, aes(x=res)) +
   geom_histogram() + 
   xlab("Residuals")
-plot_grid(neg_res_plot, neg_res_hist)
+#plot_grid(neg_res_plot, neg_res_hist)
 
 log_transform_plot_neg <- ggplot(neg_td, aes(x=log2(length), y=log2(value), label=gene)) +
   geom_point(aes(colour=res > 0.5144725)) + 
@@ -316,12 +314,12 @@ log_transform_plot_neg <- ggplot(neg_td, aes(x=log2(length), y=log2(value), labe
              hjust = 0, 
              nudge_x = 0.05)
 
-plot(log_transform_plot_neg)
+#plot(log_transform_plot_neg)
 
 
 
 ```
-`r kable(drug_resistant_residuals)`
+`r kable(drug_resistant_residuals, caption = "Tajima's D and residual values of drug resistance loci")`
 
 ###Comparison of drug resistant and sensitive populations
 For each drug where susceptibility information was available, we created alignments of drug resistant and susceptible isolates (isolates with unknown susceptibility were not included). Our hypothesis was that drug resistance conferring genes would have more extreme measures of diversity in drug resistant isolates compared to drug susceptible isolates. We also hypothesized that drug resistance genes would be among Fst outliers using drug resistant and drug susceptible isolates as populations. Genewise pi and theta were calculated using egglib.i We performed these analysis in the whole dataset as well as lineage specific alignments.
@@ -425,25 +423,25 @@ lineage4_theta_summary <- summarise(lineage4_by_drug_theta,
 overall_pi_plot <- ggplot(filter(genewise_pi_long), aes(drug, pi, color=susceptibility)) +
   geom_boxplot() +
   scale_y_log10()
-lineage2_pi_plot <- ggplot(lineage2_genewise_pi_long, aes(drug, pi, color=susceptibility)) +
-  geom_boxplot() + 
-  scale_y_log10()
-lineage4_pi_plot <- ggplot(lineage4_genewise_pi_long, aes(drug, pi, color=susceptibility)) +
-  geom_boxplot() + 
-  scale_y_log10()
+#lineage2_pi_plot <- ggplot(lineage2_genewise_pi_long, aes(drug, pi, color=susceptibility)) +
+#  geom_boxplot() + 
+#  scale_y_log10()
+#lineage4_pi_plot <- ggplot(lineage4_genewise_pi_long, aes(drug, pi, color=susceptibility)) +
+#  geom_boxplot() + 
+#  scale_y_log10()
 
-overall_theta_plot <- ggplot(genewise_theta_long, aes(drug, theta, color=susceptibility)) +
-  geom_boxplot() + 
-  scale_y_log10()
-lineage2_theta_plot <- ggplot(lineage2_genewise_theta_long, aes(drug, theta, color=susceptibility)) +
-  geom_boxplot() + 
-  scale_y_log10()
-lineage4_theta_plot <- ggplot(lineage4_genewise_theta_long, aes(drug, theta, color=susceptibility)) +
-  geom_boxplot() + 
-  scale_y_log10()
+#overall_theta_plot <- ggplot(genewise_theta_long, aes(drug, theta, color=susceptibility)) +
+#  geom_boxplot() + 
+#  scale_y_log10()
+#lineage2_theta_plot <- ggplot(lineage2_genewise_theta_long, aes(drug, theta, color=susceptibility)) +
+#  geom_boxplot() + 
+#  scale_y_log10()
+#lineage4_theta_plot <- ggplot(lineage4_genewise_theta_long, aes(drug, theta, color=susceptibility)) +
+#  geom_boxplot() + 
+#  scale_y_log10()
 
-plot_grid(overall_pi_plot, lineage2_pi_plot, lineage4_pi_plot, labels = c("A", "2", "4"), nrow=3, align="v")
-plot_grid(overall_theta_plot, lineage2_theta_plot, lineage4_theta_plot, labels = c("A", "2", "4"), nrow=3, align="v")
+#plot_grid(overall_pi_plot, lineage2_pi_plot, lineage4_pi_plot, labels = c("A", "2", "4"), nrow=3, align="v")
+#plot_grid(overall_theta_plot, lineage2_theta_plot, lineage4_theta_plot, labels = c("A", "2", "4"), nrow=3, align="v")
 
 bydrug_stats <- read.table("../data/bydrug_stats.txt", header=F)
 colnames(bydrug_stats) <- c("drug", "susceptibility", "theta", "pi", "TajimaD")
@@ -460,15 +458,9 @@ zero_plot <- ggplot(genewise_pi_zero_counts.melt, aes(x=variable, y=value)) +
 plot_grid(zero_plot, overall_pi_plot, labels = c("A", "B"), nrow=1, align="h", rel_widths = c(1,2))
 ```
 
-Conclusion: Susceptible and resistant isolates have similar levels of diversity (resistant isolates might actually be more diverse) in this data set. The implication is that drug resistance arises de novo in many cases.  Our hypothesis is that there may be diversifying selection for compensatory mutations in resistant isolates that causes them to be more diverse. A caveat is that these data sets were specifically targeting drug resistant isolates, and the suceptible isolates may be a biased sample. 
+Resistant isolates have more genes with no diversity compared to susceptible isolates. However, among genes with measurable diversity, values between susceptible and resistant isolates are similar.
 
-From cohen et al.: "Strains were chosen for study inclusion on the basis of a predetermined
-drug resistance pattern so that the dataset was heavily weighted toward drugresistant
-strains rather than accurately reflecting the epidemiology of the region."
-
-From Casali et al.: "Comparison of patient epidemiological data indicated that this sample was representative of the entire population and covered the distribution of patients with tuberculosis across the whole region."
-
-The isolates from Casali et al. were primarily lineage 2, so that may be why lineage 2 appears to have a smaller difference in diversity than lineage 4.
+####Shared invariant genes among drug resistant populations
 
 ```{r zeroDiversityGenes}
 
@@ -486,8 +478,8 @@ byDrug_noDiversity_count <- group_by(byDrug_noDiversity_resistantIsolates, drug)
   summarise(count = n(), count_resistant_specific = count-109)
 
 susceptibleDiversity <- rbind(transform(genewise_pi, resistant = 1), byDrug_noDiversity_resistantIsolates)
-ggplot(susceptibleDiversity, aes(x=resistant, y=susceptible)) + 
-  geom_boxplot(aes(group=resistant)) + facet_wrap(~drug)
+#ggplot(susceptibleDiversity, aes(x=resistant, y=susceptible)) + 
+#  geom_boxplot(aes(group=resistant)) + facet_wrap(~drug)
 
 drugs <- unique(genewise_pi$drug)
 first_line = c("INH", "RIF", "PZA", "EMB", "STR")
@@ -531,11 +523,13 @@ weighted_sample <- function(x){
   length(d$count[d$count==5])
 }
 
-weighted_sample()
+#weighted_sample()
 
-ggplot(filter(genewise_pi_bydrug_weighted, gene %in% noDiversity_resistantIsolates$gene), aes(x= drug, y=susceptible/max(susceptible))) + geom_boxplot(aes(group=drug))
+#ggplot(filter(genewise_pi_bydrug_weighted, gene %in% noDiversity_resistantIsolates$gene), aes(x= drug, y=susceptible/max(susceptible))) + geom_boxplot(aes(group=drug))
 
 ```
+
+Drug resistant populations have more invariant genes than susceptible populations, and the subset of invariant genes is larger than expected if genes are randomly selected as invariant.
 
 ####Diversity of drug resistance genes in resistant vs. susceptible isolates
 
@@ -562,30 +556,30 @@ dr_pi.plot <- ggplot(dr_pi.melt, aes(x=gene, y=value)) +
   facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") +ylab("Pi") +
   ggtitle("All Isolates Resistance Genes Pi")
 
-dr_pi_ratio.plot <- ggplot(dr_pi, aes(x=gene, y=log10(ratio))) +
-  geom_point() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-  xlab("Drug resistance gene") + ylab("Pi ratio (log 10)") +
-  ggtitle("All Isolates Resistant/Susceptbile Pi") +
-  facet_wrap(~drug, ncol=1)
+#dr_pi_ratio.plot <- ggplot(dr_pi, aes(x=gene, y=log10(ratio))) +
+#  geom_point() +
+#  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+#  xlab("Drug resistance gene") + ylab("Pi ratio (log 10)") +
+#  ggtitle("All Isolates Resistant/Susceptbile Pi") +
+#  facet_wrap(~drug, ncol=1)
   
-dr_theta.plot <- ggplot(dr_theta.melt, aes(x=gene, y=value)) +
-  geom_point(aes(color=variable)) + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
-  facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") +ylab("Theta") +
-  ggtitle("All Isolates Resistance Genes Theta")
+#dr_theta.plot <- ggplot(dr_theta.melt, aes(x=gene, y=value)) +
+#  geom_point(aes(color=variable)) + 
+#  theme(axis.text.x = element_text(angle = 90, hjust = 1, #vjust=0.5)) +
+#  facet_wrap(~drug, ncol=1) + xlab("Drug resistance gene") #+ylab("Theta") +
+#  ggtitle("All Isolates Resistance Genes Theta")
 
-dr_theta_ratio.plot <- ggplot(dr_theta, aes(x=gene, y=log10(ratio))) +
-  geom_point() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-  xlab("Drug resistance gene") + ylab("Theta ratio (log 10)") +
-  ggtitle("All Isolates Resistant/Susceptbile Theta") +
-  facet_wrap(~drug, ncol=1)
+#dr_theta_ratio.plot <- ggplot(dr_theta, aes(x=gene, y=log10(ratio))) +
+#  geom_point() +
+#  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = #0.5)) +
+#  xlab("Drug resistance gene") + ylab("Theta ratio (log 10)") +
+#  ggtitle("All Isolates Resistant/Susceptbile Theta") +
+#  facet_wrap(~drug, ncol=1)
 
 #plot(dr_pi.plot)
-plot(dr_pi_ratio.plot)
+#plot(dr_pi_ratio.plot)
 #plot(dr_theta.plot)
-plot(dr_theta_ratio.plot)
+#plot(dr_theta_ratio.plot)
 
 dr_pi_lin2 <- lineage2_genewise_pi[lineage2_genewise_pi$gene %in% resistanceGenes,]
 dr_pi_lin2 <- dr_pi_lin2[dr_pi_lin2$drug %in% first_line,]
@@ -628,8 +622,8 @@ dr_theta_ratio_lin2.plot <- ggplot(dr_theta_lin2, aes(x=gene, y=log10(ratio))) +
   ggtitle("Lineage 2 Resistant/Susceptbile Theta") +
   facet_wrap(~drug, ncol=1)
 
-plot(dr_pi_ratio_lin2.plot)
-plot(dr_theta_ratio_lin2.plot)
+#plot(dr_pi_ratio_lin2.plot)
+#plot(dr_theta_ratio_lin2.plot)
 
 dr_pi_lin4 <- lineage4_genewise_pi[lineage4_genewise_pi$gene %in% resistanceGenes,]
 dr_pi_lin4 <- dr_pi_lin4[dr_pi_lin4$drug %in% first_line,]
@@ -672,8 +666,8 @@ dr_theta_ratio_lin4.plot <- ggplot(dr_theta_lin4, aes(x=gene, y=log10(ratio))) +
   ggtitle("Lineage 4 Resistant/Susceptbile Theta") +
   facet_wrap(~drug, ncol=1)
 
-plot(dr_pi_ratio_lin4.plot)
-plot(dr_theta_ratio_lin4.plot)
+#plot(dr_pi_ratio_lin4.plot)
+#plot(dr_theta_ratio_lin4.plot)
 
 #heatmaps of resistant/susceptible ratios
 dr_pi <- mutate(dr_pi, 
@@ -707,7 +701,7 @@ dr_pi_lin2.matrix <- select(dr_pi_lin2, drug, gene, ratio_lin2)
 dr_pi_lin2.matrix <- dcast(dr_pi_lin2.matrix, gene~drug)
 rownames(dr_pi_lin2.matrix) <- dr_pi_lin2.matrix$gene
 dr_pi_lin2.matrix <- data.matrix(dr_pi_lin2.matrix[,-1])
-superheat(log10(dr_pi_lin2.matrix), heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"), heat.lim = c(-1.5, 1.5), extreme.values.na = FALSE)
+#superheat(log10(dr_pi_lin2.matrix), heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"), heat.lim = c(-1.5, 1.5), extreme.values.na = FALSE)
 
 dr_pi_lin4 <- mutate(dr_pi_lin4, 
                 resistant = replace(resistant, which(resistant == 0), 1e-6),
@@ -717,7 +711,7 @@ dr_pi_lin4.matrix <- select(dr_pi_lin4, drug, gene, ratio_lin4)
 dr_pi_lin4.matrix <- dcast(dr_pi_lin4.matrix, gene~drug)
 rownames(dr_pi_lin4.matrix) <- dr_pi_lin4.matrix$gene
 dr_pi_lin4.matrix <- data.matrix(dr_pi_lin4.matrix[,-1])
-superheat(log10(dr_pi_lin4.matrix), heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"), heat.lim = c(-1.5, 1.5), extreme.values.na = FALSE)
+#superheat(log10(dr_pi_lin4.matrix), heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"), heat.lim = c(-1.5, 1.5), extreme.values.na = FALSE)
 
 dr_pi_lineages <- inner_join(dr_pi_lin2, dr_pi_lin4)
 dr_pi_lineages <- mutate(dr_pi_lineages, ratio = ratio_lin2/ratio_lin4)
@@ -739,43 +733,8 @@ superheat(log10(dr_pi_lineages.matrix),
           order.rows = order(dr_pi.matrix[,1]))
 
 
-#linear regression of genewise diversity in susceptible vs. resistant strains
 
-genewise_res_v_susc <- group_by(na.omit(genewise_pi), drug) %>%
-  do(model = lm(resistant ~ susceptible, data=.)) %>%
-  do((function(mod) {
-    data.frame(resid = residuals(mod$model))
-  })(.))
-
-# I DON'T THINK THIS IS WORKING CORRECTLY. RESIDUAL VALUES SEEM WRONG!!!!
-
-genewise_res_v_susc <- cbind(na.omit(genewise_pi), genewise_res_v_susc) %>%
-  group_by(drug) %>%
-  mutate(perc = rank(resid)/length(resid))
-
-res_v_susc.matrix <- filter(genewise_res_v_susc, gene %in% resistanceGenes, drug %in% first_line) %>%
-  select(drug, gene, perc)
-res_v_susc.cast <- dcast(res_v_susc.matrix, gene~drug)
-rownames(res_v_susc.cast) <- res_v_susc.cast$gene
-res_v_susc.matrix <- data.matrix(res_v_susc.cast[,-1])
-res_v_susc.matrix <- res_v_susc.matrix[order(rownames(res_v_susc.matrix)),]
-superheat(res_v_susc.matrix, 
-          heat.pal = c("#7b3294", "#c2a5cf", "#f7f7f7", "#f7f7f7", "#f7f7f7", "#a6dba0", "#008837"),
-#heat.lim = c(-1.5, 1.5), 
-          extreme.values.na = FALSE, 
-          grid.hline.col = "white", 
-          grid.vline.col = "white", 
-          legend.breaks = c(0.01, 0.05, 0.1, 0.5, 0.9, 0.95, 0.99), 
-          heat.pal.values = c(0.0, 0.05, 0.1, 0.5, 0.9, 0.95, 1.0),
-          left.label.col = "white", 
-          bottom.label.col = "white",
-          pretty.order.rows = F,
-          pretty.order.cols = F,
-          order.rows = order(res_v_susc.matrix[,1]))
 ```
-
-*pncA* has the most extreme patterns of diversity in all data sets. *pncA* is a large genetic target for resistance mutations. In this case it appears that drug pressure is acting like diversifying selection. To follow up, I would like to compare *pncA* in totally susceptible isolates, PZA monoresistant isolates, and PZA susceptible isolates that are resistant to other first line drugs. 
-
 
 ####Diversity of ribosomal proteins
 
@@ -987,15 +946,10 @@ top_1_merged_indel_lin4 <- filter(fst_merged_indel_lin4_by_drug, wcFst > quantil
 
 ```
 
-`r kable(top_1_indel, caption = "Top 0.1% of Indel Fst")`
-`r kable(top_1_indel_lin2, caption = "Lineage 2: Top 0.1% of Indel Fst")`
-`r kable(top_1_indel_lin4, caption = "Lineage 4: Top 0.1% of Indel Fst")`
-
-####Indels that have high Fst values for the whole dataset
-
-The deletion near *gid* is an Fst outlier in EMB resistance, PZA resistance in the overall dataset and EMB, Et, PZA, RIF, and STR in the lineage 4 dataset. This deletion does not occur in lineage 2. I would like to investigate this further. Is this a deletion that occurred once in lineage 4 and the frequency has increased through clonal expansion or is this a deletion that has occurred many times?
 
 ###Homoplasy
+
+Homoplasy has been previously used to identify drug resistance associated loci in M. tb (Farhat et al. 2013). We identified homoplasies by performing ancestral reconstruction in TreeTime and counting the number of times SNPs arose on the phylogeny. Homoplastic SNPs were significantly enriched in drug resistance genes.
 
 ```{r homoplasy, echo=FALSE}
 
@@ -1035,14 +989,6 @@ counts_indel_merged <- matrix(data=c(5,48,487,4007),nrow=2)
 fishers_homoplasy_indel_merged <- fisher.test(counts_indel_merged)
 
 ```
-
-Homoplastic SNPs are significantly enriched in drug resistance genes (p = 6.209e-05).
-`r kable(homoplasy_counts)`
-`r kable(homoplasy_indel_drugResistant)`
-
-The frameshift variant that occurs in *gid* in the homoplasy analysis is not the same variant that is shown to be associated with drug resistance via Fst. I think that the best approach will be to combine indels in the same gene before running Fst and homoplasy analyses.
-
-* Genes of interest: Rv1760- CAP resistance, RV1762c EMB, OFL, 4327484 Et, rpoB 761110 KAN, RV1319c PRO, 4338596 PZA upstream of whiB6- which regulates ESX-1
 
 
 ```{r summaryTable}
@@ -1085,3 +1031,6 @@ sum.table.dr <- filter(sum.table, gene %in% resistanceGenes) %>%
   mutate(homoplasy = gene %in% homoplasy$gene, fst = gene %in% top_fst_homoplasy$gene) %>%
   arrange(desc(total_mutations))
 ```
+
+`r kable(sum.table.dr, caption= "Signatures of selection in known drug resistance genes.")`
+`r kable(fst_homoplasy_table_all, caption = "Homoplastic Fst outliers")`
