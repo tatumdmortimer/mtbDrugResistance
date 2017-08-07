@@ -83,7 +83,20 @@ Fst values of indels when indels from the same gene are considered identical
 #### wholeAlignmentDiversity.txt
 Diversity values for entire alignment
 
+### scripts
+#### combineIndels.py  
+Merges indels in the same gene
+#### randomizeFst.py  
+Calculates Fst after randomly assigning populations
+#### runFst.py  
+Calculates Fst
+#### selectionStats.py
+Calculates diversity statistics for alignments
+
+
 ### tables
+#### accessions.txt
+Accession numbers and lineage designation for sequence data used (Supplementary Table 1)
 #### drGenesStats.txt
 Signatures of selection in known drug resistance genes (Table 2)
 #### fst_homoplasy_table.txt
